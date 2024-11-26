@@ -3,6 +3,8 @@ def encode_resp(data: str | int | list | Exception) -> str:
     Return data encoded in RESP format
     """
     if isinstance(data, str):
+        if data == '':
+            return '$-1\r\n'
         return f'+{data}\r\n'
     if isinstance(data, int):
         return f':{data}\r\n'

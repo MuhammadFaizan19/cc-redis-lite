@@ -1,8 +1,9 @@
 import socket  # noqa: F401
 import threading
+import collections
 from app.resp_utils import encode_resp, decode_resp
 
-storage = {}
+storage = collections.defaultdict(str)
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
@@ -35,13 +36,14 @@ def connect(connection: socket.socket):
                     case ['ECHO', message]:
                         response = encode_resp(message)
                     case ['GET', key]:
-                        if key not in storage:
-                            response = encode_resp(None)
-                        else:
-                            response = encode_resp(storage[key])
+                        response = encode_resp(storage[key])
                     case ['SET', key, value]:
                         storage[key] = value
                         response = encode_resp('OK')
+                    case ['SET', key, value, expiry, ttl]:
+                        storage[key] = value
+                        response = encode_resp('OK')
+                        threading.Timer(int(ttl) / 1000, lambda: storage.pop(key)).start()
                     case ['DEL', key]:
                         response = encode_resp(f'mock_del_{key}')
                     case _:
