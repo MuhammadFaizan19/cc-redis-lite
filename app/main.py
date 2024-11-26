@@ -1,6 +1,6 @@
 import socket  # noqa: F401
 import threading
-
+from app.resp_utils import encode_resp, decode_resp
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
@@ -23,13 +23,28 @@ def connect(connection: socket.socket):
             connected = bool(command)
 
             response: str
-            match command:
-                case '*1\r\n$4\r\nPING\r\n':
-                    response = '+PONG\r\n'
-            
+            try:
+                decoded_command = decode_resp(command)
+                print(f'decoded - {decoded_command}')
+
+                match decoded_command:
+                    case ['PING']:
+                        response = encode_resp('PONG')
+                    case ['ECHO', message]:
+                        response = encode_resp(message)
+                    case ['GET', key]:
+                        response = encode_resp(f'mock_value_for_{key}')
+                    case ['SET', key, value]:
+                        response = encode_resp(f'mock_set_{key}_{value}')
+                    case ['DEL', key]:
+                        response = encode_resp(f'mock_del_{key}')
+                    case _:
+                        response = encode_resp(Exception('Unknown command'))
+            except Exception as e:
+                response = encode_resp(e)
+
             connection.sendall(response.encode())
             print(f'sent - {response}')
-
 
 if __name__ == "__main__":
     main()
