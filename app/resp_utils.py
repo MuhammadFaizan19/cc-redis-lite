@@ -5,7 +5,7 @@ def encode_resp(data: str | int | list | Exception) -> str:
     if isinstance(data, str):
         if data == '':
             return '$-1\r\n'
-        return f'+{data}\r\n'
+        return f'${len(data)}\r\n{data}\r\n'
     if isinstance(data, int):
         return f':{data}\r\n'
     if isinstance(data, list):
