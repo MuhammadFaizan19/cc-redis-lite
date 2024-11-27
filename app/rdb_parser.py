@@ -1,5 +1,5 @@
 import struct
-
+import os
 
 class RDBParser:
     def __init__(self, file_path):
@@ -118,6 +118,9 @@ class RDBParser:
 
     def parse(self):
         """Main parsing function."""
+        if not os.path.exists(self.file_path):
+            print(f"File not found: {self.file_path}")
+            return
         self.load_file()  # Load the file into memory
         self.parse_header()
         self.parse_opcodes()

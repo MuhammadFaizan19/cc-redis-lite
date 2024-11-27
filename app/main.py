@@ -57,11 +57,10 @@ def connect(connection: socket.socket):
                             response = encode_resp([key, config.get(key, '')])
                     case ['KEYS', pattern]:
                         if pattern == '*':
-                            file = config['dir'] + '/' + config['dbfilename']
-                            parser = RDBParser(file)
-                            parser.parse()
-                            keys = parser.getKeys()
-                            response = encode_resp(keys)
+                            response = encode_resp(list(storage.keys()))
+                        else:
+                            response = encode_resp(parser.parsed_data.get(pattern, ''))
+
                     case _:
                         response = encode_resp(Exception('Unknown command'))
             except Exception as e:
@@ -78,4 +77,10 @@ if __name__ == "__main__":
     if args := parser.parse_args():
         config['dir'] = args.dir or config['dir']
         config['dbfilename'] = args.dbfilename or config['dbfilename']
+        if config['dir'] and config['dbfilename']:
+            file = config['dir'] + '/' + config['dbfilename']
+            parser = RDBParser(file)
+            parser.parse()
+            storage = parser.parsed_data
+
     main()
