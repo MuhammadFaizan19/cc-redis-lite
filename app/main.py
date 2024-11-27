@@ -2,6 +2,7 @@ import socket  # noqa: F401
 import threading
 import collections
 import argparse
+import time
 from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
 
@@ -28,7 +29,6 @@ def connect(connection: socket.socket):
         connected: bool = True
         while connected:
             command: str = connection.recv(8000).decode()
-            print(f'recieved - {command}')
             connected = bool(command)
 
             response: str
@@ -42,6 +42,7 @@ def connect(connection: socket.socket):
                     case ['ECHO', message]:
                         response = encode_resp(message)
                     case ['GET', key]:
+                        print(f'key - {key} - {storage[key]}')
                         response = encode_resp(storage[key])
                     case ['SET', key, value]:
                         storage[key] = value
@@ -66,8 +67,23 @@ def connect(connection: socket.socket):
             except Exception as e:
                 response = encode_resp(e)
 
-            connection.sendall(response.encode())
             print(f'sent - {response}')
+            connection.sendall(response.encode())
+
+def load_rdb(filepath: str):
+    parser = RDBParser(filepath)
+    for key, (val, exp) in parser.parse().items():
+        decoded_key = key.decode('utf-8', errors='replace')
+        decoded_val = val.decode('utf-8', errors='replace')
+        storage[decoded_key] = decoded_val
+        current_time_ms = int(time.time() * 1000)
+   
+        if exp:
+            if exp < current_time_ms:
+                storage.pop(decoded_key)
+            else:
+                threading.Timer((exp - int(time.time() * 1000)) / 1000, lambda: storage.pop(decoded_key)).start()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -79,8 +95,5 @@ if __name__ == "__main__":
         config['dbfilename'] = args.dbfilename or config['dbfilename']
         if config['dir'] and config['dbfilename']:
             file = config['dir'] + '/' + config['dbfilename']
-            parser = RDBParser(file)
-            parser.parse()
-            storage = parser.parsed_data
-
+            load_rdb(file)        
     main()

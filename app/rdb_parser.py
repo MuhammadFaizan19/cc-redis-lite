@@ -1,129 +1,95 @@
-import struct
 import os
+from typing import Dict, Tuple, Optional
+
 
 class RDBParser:
-    def __init__(self, file_path):
+    def __init__(self, file_path: str):
         self.file_path = file_path
-        self.data = b""  # Entire file data as bytes
-        self.offset = 0  # Current reading position in data
-        self.parsed_data = {}
-        self.aux_fields = {}
+        self.store: Dict[bytes, Tuple[bytes, Optional[int]]] = {}
 
-    def load_file(self):
-        """Load the RDB file into memory."""
-        with open(self.file_path, "rb") as f:
-            self.data = f.read()
-
-    def read_bytes(self, n):
-        """Read n bytes from the in-memory data."""
-        if self.offset + n > len(self.data):
-            raise ValueError("Unexpected end of RDB file!")
-        result = self.data[self.offset:self.offset + n]
-        self.offset += n
-        return result
-
-    def read_length_encoded_int(self):
-        """Decode a length-encoded integer."""
-        first_byte = self.data[self.offset]
-        self.offset += 1
-        type_flag = (first_byte & 0xC0) >> 6
-
-        if type_flag == 0:  # 6-bit integer
-            return first_byte & 0x3F
-        elif type_flag == 1:  # 14-bit integer
-            second_byte = self.data[self.offset]
-            self.offset += 1
-            return ((first_byte & 0x3F) << 8) | second_byte
-        elif type_flag == 2:  # 32-bit integer
-            value = struct.unpack(">I", self.read_bytes(4))[0]
-            return value
-        elif type_flag == 3:  # Special encoding
-            special_type = first_byte & 0x3F
-            return self.handle_special_encoding(special_type)
+    def _parse_db_len(self, data: bytes, pos: int) -> Tuple[int, int]:
+        first = data[pos]
+        pos += 1
+        start = first >> 6
+        if start == 0b00:
+            length = first
+        elif start == 0b01:
+            first &= 0b00111111
+            second = data[pos]
+            pos += 1
+            length = (first << 8) + second
+        elif start == 0b10:
+            length = int.from_bytes(data[pos:pos + 4], "little")
+            pos += 4
+        elif start == 0b11:
+            first &= 0b00111111
+            length = 2**first
         else:
-            raise ValueError("Unsupported length encoding!")
+            raise ValueError(f"Unknown DB length type {start} at position {pos}")
+        return length, pos
 
-    def handle_special_encoding(self, special_type):
-        """Handle special encoding based on the type."""
-        if special_type == 0:  # Example: Special Integer Encoding
-            value = self.data[self.offset]
-            self.offset += 1
-            return value
-        else:
-            raise ValueError(f"Unsupported special encoding type: {special_type}")
+    def _parse_db_string(self, data: bytes, pos: int) -> Tuple[bytes, int]:
+        length, pos = self._parse_db_len(data, pos)
+        value = data[pos:pos + length]
+        pos += length
+        return value, pos
 
-    def read_string_or_special(self):
-        """Determine if the data is a string or special encoded value."""
-        first_byte = self.data[self.offset]
-        if (first_byte & 0xC0) >> 6 == 3:  # Special encoding
-            self.offset += 1
-            special_type = first_byte & 0x3F
-            return self.handle_special_encoding(special_type)
-        else:
-            return self.read_string()
+    def _parse_keyvalue(self, data: bytes, pos: int) -> Tuple[bytes, bytes, int]:
+        vtype = data[pos]
+        if vtype not in (0, 9, 10, 11, 12, 13):
+            raise ValueError(f"Unsupported value type {vtype} at position {pos}")
+        pos += 1
+        key, pos = self._parse_db_string(data, pos)
+        val, pos = self._parse_db_string(data, pos)
+        return key, val, pos
 
-    def read_string(self):
-        """Decode a Redis string."""
-        length = self.read_length_encoded_int()
-        if length == -1:
-            raise ValueError("Compressed string not implemented!")
-        return self.read_bytes(length).decode('utf-8', errors='replace')
-
-    def parse_header(self):
-        """Parse the RDB header."""
-        magic = self.read_bytes(5).decode('ascii')
-        if magic != "REDIS":
-            raise ValueError("Invalid RDB file magic header!")
-        version = int(self.read_bytes(4).decode('ascii'))
-
-    def parse_opcodes(self):
-        """Parse opcodes in the RDB file."""
-        while self.offset < len(self.data):
-            op = self.data[self.offset]
-            self.offset += 1
-            if op == 0xFE:  # SELECTDB opcode
-                db_number = self.read_length_encoded_int()
-            elif op == 0xFA:  # AUX opcode
-                key = self.read_string()
-                value = self.read_string_or_special()
-                self.aux_fields[key] = value
-            elif op == 0xFD:  # EXPIRETIME opcode
-                expiry = struct.unpack(">I", self.read_bytes(4))[0]
-            elif op == 0xFC:  # EXPIRETIMEMS opcode
-                expiry = struct.unpack(">Q", self.read_bytes(8))[0]
-            elif op == 0xFF:  # EOF opcode
-                break
-            else:
-                # Handle key-value pairs
-                value_type = op
-                key = self.read_string()
-                value = self.parse_value(value_type)
-                if value is not None:
-                    self.parsed_data[key] = value
-
-    def parse_value(self, value_type):
-        """Parse a value based on its type."""
-        if value_type == 0:  # String
-            return self.read_string()
-        elif value_type in (1, 2):  # List or Set
-            size = self.read_length_encoded_int()
-            return [self.read_string() for _ in range(size)]
-        elif value_type == 3:  # Sorted Set
-            size = self.read_length_encoded_int()
-            return {self.read_string(): self.read_bytes(8) for _ in range(size)}
-        elif value_type == 0xFB:  # Handle the special type 0xFB (251)
-            return None  # Handle as needed
-        else:
-            raise NotImplementedError(f"Value type {value_type} not implemented.")
-
-    def parse(self):
-        """Main parsing function."""
+    def parse(self) -> Dict[bytes, Tuple[bytes, Optional[int]]]:
         if not os.path.exists(self.file_path):
-            print(f"File not found: {self.file_path}")
-            return
-        self.load_file()  # Load the file into memory
-        self.parse_header()
-        self.parse_opcodes()
-    
-    def getKeys(self):
-        return list(self.parsed_data.keys())
+            print(f"Error: File {self.file_path} not found")
+            return self.store
+
+        with open(self.file_path, "rb") as db_file:
+            data = db_file.read()
+
+        if data[:5] != b"REDIS":
+            raise ValueError("Incorrect RDB format")
+
+        pos = 9  # Skip "REDIS" magic and version
+
+        while pos < len(data):
+            op = data[pos]
+            pos += 1
+            if op == 0xFA:  # Auxiliary data
+                key, pos = self._parse_db_string(data, pos)
+                val, pos = self._parse_db_string(data, pos)
+                # print(f"Auxiliary data: {key.decode()}: {val.decode()}")
+            elif op == 0xFE:  # Select DB
+                db_num, pos = self._parse_db_len(data, pos)
+                # print(f"Selected DB number: {db_num}")
+            elif op == 0xFB:  # Resize DB
+                _, pos = self._parse_db_len(data, pos)
+                _, pos = self._parse_db_len(data, pos)
+                # print("Resize DB hash size")
+            elif op == 0xFD:  # Expire time in seconds
+                exp = int.from_bytes(data[pos:pos + 4], "little") * 1_000
+                pos += 4
+                key, val, pos = self._parse_keyvalue(data, pos)
+                self.store[key] = (val, exp)
+                # print(f"Key stored with expiration (sec): {key.decode()}: {val.decode()}, exp: {exp}")
+            elif op == 0xFC:  # Expire time in milliseconds
+                exp = int.from_bytes(data[pos:pos + 8], "little")
+                pos += 8
+                key, val, pos = self._parse_keyvalue(data, pos)
+                self.store[key] = (val, exp)
+                # print(f"Key stored with expiration (ms): {key.decode()}: {val.decode()}, exp: {exp}")
+            elif op == 0xFF:  # End of file
+                print("End of RDB file")
+                break
+            else:  # Default parsing for unknown types
+                pos -= 1  # Backtrack
+                key, val, pos = self._parse_keyvalue(data, pos)
+                self.store[key] = (val, None)
+                # print(f"Key stored with no expiration: {key.decode()}: {val.decode()}")
+
+        print(f"Finished parsing RDB with {len(self.store)} keys")
+        return self.store
