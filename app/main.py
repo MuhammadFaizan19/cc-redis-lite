@@ -3,6 +3,7 @@ import threading
 import collections
 import argparse
 from app.resp_utils import encode_resp, decode_resp
+from app.rdb_parser import RDBParser
 
 config = {
     'dir': None,
@@ -54,6 +55,13 @@ def connect(connection: socket.socket):
                     case ['CONFIG', command, key]:
                         if command == 'GET':
                             response = encode_resp([key, config.get(key, '')])
+                    case ['KEYS', pattern]:
+                        if pattern == '*':
+                            file = config['dir'] + '/' + config['dbfilename']
+                            parser = RDBParser(file)
+                            parser.parse()
+                            keys = parser.getKeys()
+                            response = encode_resp(keys)
                     case _:
                         response = encode_resp(Exception('Unknown command'))
             except Exception as e:
