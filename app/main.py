@@ -5,6 +5,7 @@ import argparse
 import time
 from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
+from app.utils import generate_random_string
 
 replication_info = {}
 config = {
@@ -108,4 +109,6 @@ if __name__ == "__main__":
             load_rdb(file)  
         # update replication info
         replication_info['role'] = 'slave' if args.replicaof else 'master'
+        replication_info['master_replid'] = generate_random_string(40)
+        replication_info['master_repl_offset'] = 0
     main()
