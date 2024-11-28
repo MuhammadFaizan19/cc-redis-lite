@@ -51,5 +51,6 @@ def decode_resp(message):
         if length == -1:
             return None
         return message.split('\r\n')[1][:length]
-    raise ValueError('Unsupported RESP type')
+    
+    raise ValueError(f'Unsupported RESP type for decoding: {message} - {type(message)}')
 

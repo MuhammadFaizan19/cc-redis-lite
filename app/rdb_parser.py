@@ -5,7 +5,7 @@ from typing import Dict, Tuple, Optional
 class RDBParser:
     def __init__(self, file_path: str):
         self.file_path = file_path
-        self.store: Dict[bytes, Tuple[bytes, Optional[int]]] = {}
+        self.store: Dict[str, Tuple[str, Optional[int]]] = {}
 
     def _parse_db_len(self, data: bytes, pos: int) -> Tuple[int, int]:
         first = data[pos]
@@ -28,13 +28,13 @@ class RDBParser:
             raise ValueError(f"Unknown DB length type {start} at position {pos}")
         return length, pos
 
-    def _parse_db_string(self, data: bytes, pos: int) -> Tuple[bytes, int]:
+    def _parse_db_string(self, data: bytes, pos: int) -> Tuple[str, int]:
         length, pos = self._parse_db_len(data, pos)
-        value = data[pos:pos + length]
+        value = (data[pos:pos + length]).decode('utf-8', errors='replace')
         pos += length
         return value, pos
 
-    def _parse_keyvalue(self, data: bytes, pos: int) -> Tuple[bytes, bytes, int]:
+    def _parse_keyvalue(self, data: bytes, pos: int) -> Tuple[str, str, int]:
         vtype = data[pos]
         if vtype not in (0, 9, 10, 11, 12, 13):
             raise ValueError(f"Unsupported value type {vtype} at position {pos}")
@@ -43,7 +43,7 @@ class RDBParser:
         val, pos = self._parse_db_string(data, pos)
         return key, val, pos
 
-    def parse(self) -> Dict[bytes, Tuple[bytes, Optional[int]]]:
+    def parse(self) -> Dict[str, Tuple[str, Optional[int]]]:
         if not os.path.exists(self.file_path):
             print(f"Error: File {self.file_path} not found")
             return self.store
