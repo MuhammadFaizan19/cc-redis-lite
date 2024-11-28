@@ -6,9 +6,7 @@ import time
 from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
 
-replication_info = {
-   'role': 'master',
-}
+replication_info = {}
 config = {
     'port': 6379,
     'dir': None,
@@ -97,13 +95,17 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int)
     parser.add_argument('--dir', type=str)
     parser.add_argument('--dbfilename', type=str)
+    parser.add_argument('--replicaof', type=str)
 
 
     if args := parser.parse_args():
+        # Update the config with the provided arguments
         config['port'] = args.port or config['port']
         config['dir'] = args.dir or config['dir']
         config['dbfilename'] = args.dbfilename or config['dbfilename']
         if config['dir'] and config['dbfilename']:
             file = config['dir'] + '/' + config['dbfilename']
             load_rdb(file)  
+        # update replication info
+        replication_info['role'] = 'slave' if args.replicaof else 'master'
     main()
