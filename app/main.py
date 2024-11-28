@@ -71,8 +71,10 @@ def connect(connection: socket.socket):
                         if section == 'replication':
                             string = ''.join([f'{k}:{v}\r\n' for k, v in replication_info.items()])
                             response = encode_resp(string)
-                    case ['REPLCONF', key, value]:
+                    case ['REPLCONF', conf_key, val]:
                         response = encode_resp('OK')
+                    case ['PSYNC', master_id, repl_offset]:
+                        response = encode_resp(f'FULLRESYNC {replication_info['master_replid']} 0')
                     case _:
                         response = encode_resp(Exception('Unknown command'))
             except Exception as e:
