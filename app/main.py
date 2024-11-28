@@ -8,6 +8,7 @@ from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
 from app.utils import generate_random_string
 
+send_empty_rdb = False
 replication_info = {
     'role': 'master'
 }
@@ -31,6 +32,7 @@ def main():
 
 
 def connect(connection: socket.socket):
+    global send_empty_rdb
     with connection:
         connected: bool = True
         while connected:
@@ -75,6 +77,7 @@ def connect(connection: socket.socket):
                         response = encode_resp('OK')
                     case ['PSYNC', master_id, repl_offset]:
                         response = encode_resp(f'FULLRESYNC {replication_info['master_replid']} 0')
+                        send_empty_rdb = True
                     case _:
                         response = encode_resp(Exception('Unknown command'))
             except Exception as e:
@@ -82,6 +85,11 @@ def connect(connection: socket.socket):
 
             print(f'sent - {response}')
             connection.sendall(response.encode())
+            if send_empty_rdb:
+                empty_hex = '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
+                content = bytes.fromhex(empty_hex)
+                connection.sendall(f'${len(content)}\r\n'.encode() + content)
+                send_empty_rdb = False
 
 def load_rdb(filepath: str):
     parser = RDBParser(filepath)
