@@ -98,16 +98,18 @@ def connect_master(host, path):
     handshake_requests = [
         (encode_resp(['PING']).encode(), 'PONG'),
         (encode_resp(['REPLCONF', 'listening-port', str(config['port'])]).encode(), 'OK'),
-        (encode_resp(['REPLCONF', 'capa', 'psync2']).encode(), 'OK')
+        (encode_resp(['REPLCONF', 'capa', 'psync2']).encode(), 'OK'),
+        (encode_resp(['psync', '?', '-1']).encode(), None)
     ]
 
     for req, res in handshake_requests:
         master.sendall(req)
-        response = decode_resp(master.recv(1024).decode())
+        if res:
+            response = decode_resp(master.recv(8000).decode())
 
-        if response == res:
-            continue
-        raise Exception(f'Error: Unexpected response from master {response}')
+            if response == res:
+                continue
+            raise Exception(f'Error: Unexpected response from master {response}')
 
 
 if __name__ == "__main__":
