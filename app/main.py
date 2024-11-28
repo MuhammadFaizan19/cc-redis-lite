@@ -71,6 +71,8 @@ def connect(connection: socket.socket):
                         if section == 'replication':
                             string = ''.join([f'{k}:{v}\r\n' for k, v in replication_info.items()])
                             response = encode_resp(string)
+                    case ['REPLCONF', key, value]:
+                        response = encode_resp('OK')
                     case _:
                         response = encode_resp(Exception('Unknown command'))
             except Exception as e:
