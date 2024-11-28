@@ -6,6 +6,9 @@ import time
 from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
 
+replication_info = {
+   'role': 'master',
+}
 config = {
     'port': 6379,
     'dir': None,
@@ -62,7 +65,10 @@ def connect(connection: socket.socket):
                             response = encode_resp(list(storage.keys()))
                         else:
                             response = encode_resp(parser.parsed_data.get(pattern, ''))
-
+                    case ['INFO', section]:
+                        if section == 'replication':
+                            string = ''.join([f'{k}:{v}\r\n' for k, v in replication_info.items()])
+                            response = encode_resp(string)
                     case _:
                         response = encode_resp(Exception('Unknown command'))
             except Exception as e:
