@@ -93,9 +93,21 @@ def load_rdb(filepath: str):
             else:
                 threading.Timer((exp - int(time.time() * 1000)) / 1000, lambda: storage.pop(decoded_key)).start()
 
-def ping_master(host, path):
+def connect_master(host, path):
     master = socket.create_connection((host, path))
-    master.sendall(encode_resp(['PING']).encode())
+    handshake_requests = [
+        (encode_resp(['PING']).encode(), 'PONG'),
+        (encode_resp(['REPLCONF', 'listening-port', str(config['port'])]).encode(), 'OK'),
+        (encode_resp(['REPLCONF', 'capa', 'psync2']).encode(), 'OK')
+    ]
+
+    for req, res in handshake_requests:
+        master.sendall(req)
+        response = decode_resp(master.recv(1024).decode())
+
+        if response == res:
+            continue
+        raise Exception(f'Error: Unexpected response from master {response}')
 
 
 if __name__ == "__main__":
@@ -117,7 +129,7 @@ if __name__ == "__main__":
         if args.replicaof:
             replication_info['role'] = 'slave' if args.replicaof else 'master'
             host, path = args.replicaof.split(' ')
-            ping_master(host, path)
+            connect_master(host, path)
         replication_info['master_replid'] = generate_random_string(40)
         replication_info['master_repl_offset'] = 0
 
