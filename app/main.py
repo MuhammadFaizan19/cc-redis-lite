@@ -7,13 +7,14 @@ from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
 
 config = {
+    'port': 6379,
     'dir': None,
     'dbfilename': None,
 }
 storage = collections.defaultdict(str)
 
 def main():
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+    server_socket = socket.create_server(("localhost", config['port']), reuse_port=True)
     
     while True:
         connection: socket.socket
@@ -87,13 +88,16 @@ def load_rdb(filepath: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int)
     parser.add_argument('--dir', type=str)
     parser.add_argument('--dbfilename', type=str)
 
+
     if args := parser.parse_args():
+        config['port'] = args.port or config['port']
         config['dir'] = args.dir or config['dir']
         config['dbfilename'] = args.dbfilename or config['dbfilename']
         if config['dir'] and config['dbfilename']:
             file = config['dir'] + '/' + config['dbfilename']
-            load_rdb(file)        
+            load_rdb(file)  
     main()
