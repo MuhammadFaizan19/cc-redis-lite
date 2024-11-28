@@ -3,11 +3,14 @@ import threading
 import collections
 import argparse
 import time
+
 from app.resp_utils import encode_resp, decode_resp
 from app.rdb_parser import RDBParser
 from app.utils import generate_random_string
 
-replication_info = {}
+replication_info = {
+    'role': 'master'
+}
 config = {
     'port': 6379,
     'dir': None,
@@ -90,6 +93,10 @@ def load_rdb(filepath: str):
             else:
                 threading.Timer((exp - int(time.time() * 1000)) / 1000, lambda: storage.pop(decoded_key)).start()
 
+def ping_master(host, path):
+    master = socket.create_connection((host, path))
+    master.sendall(encode_resp(['PING']).encode())
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -97,7 +104,6 @@ if __name__ == "__main__":
     parser.add_argument('--dir', type=str)
     parser.add_argument('--dbfilename', type=str)
     parser.add_argument('--replicaof', type=str)
-
 
     if args := parser.parse_args():
         # Update the config with the provided arguments
@@ -108,7 +114,11 @@ if __name__ == "__main__":
             file = config['dir'] + '/' + config['dbfilename']
             load_rdb(file)  
         # update replication info
-        replication_info['role'] = 'slave' if args.replicaof else 'master'
+        if args.replicaof:
+            replication_info['role'] = 'slave' if args.replicaof else 'master'
+            host, path = args.replicaof.split(' ')
+            ping_master(host, path)
         replication_info['master_replid'] = generate_random_string(40)
         replication_info['master_repl_offset'] = 0
+
     main()
