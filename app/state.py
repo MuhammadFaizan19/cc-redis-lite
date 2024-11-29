@@ -13,6 +13,7 @@ class State:
         self.store = collections.defaultdict(str)
         self.conf = { 'host': 'localhost' }
         self.repl = { 'role': 'master' }
+        self.repl_connections = []
         self.load_default()
     
     def load_default(self):

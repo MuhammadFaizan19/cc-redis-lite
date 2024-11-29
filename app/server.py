@@ -24,17 +24,17 @@ class Server:
         with connection:
             connected: bool = True
             while connected:
-                command: str = connection.recv(8000).decode()
-                connected = bool(command)
+                resp_command: str = connection.recv(8000).decode()
+                connected = bool(resp_command)
 
-                command = decode_resp(command)
+                command = decode_resp(resp_command)
 
                 try:
-                    self.handle_command(connection, command)
+                    self.handle_command(connection, command, resp_command)
                 except Exception as e:
                     connection.sendall(encode_resp(e).encode())
 
-    def handle_command(self, connection: socket.socket, command):
+    def handle_command(self, connection: socket.socket, command, resp_command):
         
         def send_response(data):
             connection.sendall((encode_resp(data)).encode())
@@ -48,13 +48,16 @@ class Server:
                 send_response(self.state.store.get(key, ''))
             case ['SET', key, value]:
                 self.state.set_store([(key, value)])
+                self.propagate(resp_command)
                 send_response('OK')
             case ['SET', key, value, expiry, ttl]:
                 self.state.set_store([(key, value)])
                 self.state.set_store_key_expiry([(key, int(ttl) + time.time() * 1000)])
+                self.propagate(resp_command)
                 send_response('OK')
             case ['DEL', key]:
                 self.state.delete_key(key)
+                self.propagate(resp_command)
                 send_response('OK')
             case ['CONFIG', 'GET', key]:
                 send_response([key, self.state.conf.get(key, '')])
@@ -70,4 +73,11 @@ class Server:
                 send_response(f'FULLRESYNC {self.state.repl.get('master_replid')} 0')
                 empty_rdb_content = b'REDIS0011\xfa\tredis-ver\x057.2.0\xfa\nredis-bits\xc0@\xfa\x05ctime\xc2m\x08\xbce\xfa\x08used-mem\xc2\xb0\xc4\x10\x00\xfa\x08aof-base\xc0\x00\xff\xf0n;\xfe\xc0\xffZ\xa2'
                 connection.sendall(f'${len(empty_rdb_content)}\r\n'.encode() + empty_rdb_content)
+                self.state.repl_connections.append(connection)
 
+    def propagate(self, data):
+        try:
+            for connection in self.state.repl_connections:
+                connection.sendall(data.encode())
+        except Exception as e:
+            print(e)
