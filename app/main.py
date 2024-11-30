@@ -1,8 +1,21 @@
-from app.server import Server
+import socket
+from app.constants import Constants
+from app.state import State
+from app.processor import CommandProcessor, SlaveCommandProcessor
+from app.config import load_config
 
 def main():
-    redis_server = Server()
-    redis_server.start_server()
+    config = load_config()
+    state = State(config)
+    server = socket.create_server((config['host'], config['port']), reuse_port=True)
 
-if __name__ == "__main__":
+    if state.role == Constants.SLAVE:
+       SlaveCommandProcessor(state, config).start()
+
+    while True:
+        connection, address = server.accept()
+        CommandProcessor(connection, state, config).start()
+
+
+if __name__ == '__main__':
     main()

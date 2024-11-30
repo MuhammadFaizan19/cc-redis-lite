@@ -1,63 +1,81 @@
 import time
-import argparse
 import threading
 import collections
-from typing import List, Tuple
 
-from app.rdb_parser import RDBParser
-from app.connection import Connection
-from app.utils import generate_random_string
+from app.constants import Constants
+from app.utils import RDBParser
 
-class State:
-    def __init__(self):
-        self.store = collections.defaultdict(str)
-        self.conf = { 'host': 'localhost' }
-        self.repl = { 'role': 'master' }
-        self.repl_connections = []
-        self.load_default()
+class Store:
+    def __init__(self) -> None:
+        self.store = collections.defaultdict(lambda: ('', None))
     
-    def load_default(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--port', type=int)
-        parser.add_argument('--dir', type=str)
-        parser.add_argument('--dbfilename', type=str)
-        parser.add_argument('--replicaof', type=str)
+    def save(self, key: str, value: str, ttl: int = None):
+        self.store[key] = (value, ttl)
+    
+    def get(self, key: str) -> str | None:
+        return self.store[key][0] if not self.is_expired(key) else ''
 
-        if args := parser.parse_args():
-            self.conf['port'] = args.port or 6379
-            self.conf['dir'] = args.dir
-            self.conf['dbfilename'] = args.dbfilename
-            if args.dir and args.dbfilename: 
-                self.load_rdb(f"{self.conf['dir']}/{self.conf['dbfilename']}")
-            if args.replicaof:
-                host, path = args.replicaof.split(' ')
-                self.repl['role'] = 'slave' if args.replicaof else 'master'
-                master_connection = Connection(host, path)
-                master_connection.handshake(self.conf['port'])
-            self.repl['master_replid'] = generate_random_string(40)
-            self.repl['master_repl_offset'] = 0
+    def delete(self, key: str) -> None:
+        self.store.pop(key, None)
     
-    def set_replication_info(self, items: List[Tuple[str, str]]):
-        for key, value in items:
-            self.replication_info[key] = value
-    
-    def set_store(self, items: List[Tuple[str, str]]):
-        for key, value in items:
-            self.store[key] = value
-    
-    def set_store_key_expiry(self, items: List[Tuple[str, int]]):
-        current_time_ms = int(time.time() * 1000)
-        for key, exp in items:
-            if exp < current_time_ms:
-                self.store.pop(key)
-                continue
-            threading.Timer((exp - int(time.time() * 1000)) / 1000, lambda: self.store.pop(key)).start()
-    
-    def delete_key(self, key: str):
-        self.store.pop(key)
+    def is_expired(self, key: str) -> bool:
+        ttl = self.store[key][1]
+        if ttl and ttl < time.time() * 1000:
+            self.delete(key)
+            return True
+        return False
 
-    def load_rdb(self, filepath: str):
-        items = RDBParser(filepath).parse()
+    def exists(self, key: str) -> bool:
+        return key in self.store
+    
+    def keys(self) -> list[str]:
+        return list(self.store.keys())
+    
+    def flush(self) -> None:
+        self.store.clear()
         
-        self.set_store([(key, val) for key, (val, exp) in items.items()])
-        self.set_store_key_expiry([(key, exp) for key, (val, exp) in items.items() if exp])
+
+class State(Store):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.role = Constants.SLAVE if self.config['is_replica'] else Constants.MASTER
+        self.buffers = {}
+        self.repl_connections_lock = threading.Lock()
+        self.repl_ports: list[(str, int)] = []
+        self.replica_present = False
+        self.load_rdb()
+    
+    def get_config(self, key: str) -> str | None:
+        return self.config[key] if key in self.config else ''
+
+    def get_info(self):
+        return ''.join([
+            f'role:{self.role}\r\n',
+            f'master_replid:{self.config["master_replid"]}\r\n',
+            f'master_repl_offset:{self.config["master_repl_offset"]}\r\n'
+        ])
+
+    def is_master(self):
+        return self.role == Constants.MASTER
+        
+    def add_command_buffer(self, command):
+        for k,_ in self.buffers.items():
+            self.buffers[k].append(command)
+        return 0
+    
+    def add_new_replica(self) -> int:
+        self.replica_present = True
+        id = len(self.buffers)
+        self.buffers[id] = collections.deque([])
+        return id
+
+    def load_rdb(self):
+        if not self.config['dir'] or not self.config['dbfilename']:
+            return
+        filepath = f"{self.config['dir']}/{self.config['dbfilename']}"
+        items = RDBParser(filepath).parse()
+    
+        for key, (value, ttl) in items.items():
+            self.save(key, value, ttl)
+        
