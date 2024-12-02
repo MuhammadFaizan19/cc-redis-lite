@@ -60,10 +60,8 @@ class CommandProcessor(Thread):
             case [Constants.DEL, key]:
                 self.state.delete(key)
                 return [Constants.OK]
-            case [Constants.CONFIG, cmd, key]:
-                if cmd.lower() == Constants.GET:
-                    return [RESPParser.encode([key, self.config[key]]).encode()]
-                return []
+            case [Constants.CONFIG, Constants.GET, key]:
+                return [RESPParser.encode([key, self.config[key]]).encode()]
             case [Constants.KEYS, pattern]:
                 return [RESPParser.encode(self.state.keys()).encode()]
             case [Constants.INFO, section]:
@@ -80,7 +78,7 @@ class CommandProcessor(Thread):
                 self.buffer_id = self.state.add_new_replica()
                 return [full_resync, rdb]
         print(f'Command not recognized: {command}')
-        return []
+        return Constants.NULL
     
     def run_sync_replica(self):
         while True:
@@ -131,8 +129,11 @@ class SlaveCommandProcessor(Thread):
             case [Constants.DEL, key]:
                 self.state.delete(key)
                 return Constants.OK
+            case [Constants.REPL_CONF, Constants.GETACK, pattern]:
+                if pattern == '*':
+                    return RESPParser.encode([Constants.REPL_CONF, Constants.ACK, '0']).encode()
         print(f'Command not recognized: {command}') 
-        return []
+        return Constants.NULL
             
     def handshake(self):
         try:
@@ -145,8 +146,9 @@ class SlaveCommandProcessor(Thread):
             connection.sendall(RESPParser.encode(['REPLCONF', 'capa', 'psync2']).encode())
             connection.recv(1024)
             connection.sendall(RESPParser.encode(['PSYNC', '?', '-1']).encode())
-            connection.recv(1024)
-            connection.recv(1024)
+            a = connection.recv(1024)
+            b = connection.recv(1024)
+            print('Handshake successful')
 
             return connection
         except Exception as e:

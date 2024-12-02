@@ -44,7 +44,7 @@ class RESPParser:
             try:
                 message, current_index = RESPParser._parse_value(buffer, current_index)
                 if isinstance(message, list) and message and isinstance(message[0], str):
-                    message[0] = message[0].lower()  # Normalize the command name
+                    message[0] = message[0].upper()  # Normalize the command name
                 decoded_messages.append(message)
             except RESPParser.IncompleteRESPError:
                 return decoded_messages, buffer[current_index:]
