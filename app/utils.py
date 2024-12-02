@@ -133,8 +133,7 @@ class RESPParser:
 
 class RDBParser:
     
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self):
         self.store: Dict[str, Tuple[str, Optional[int]]] = {}
 
     def _parse_db_len(self, data: bytes, pos: int) -> Tuple[int, int]:
@@ -172,14 +171,21 @@ class RDBParser:
         key, pos = self._parse_db_string(data, pos)
         val, pos = self._parse_db_string(data, pos)
         return key, val, pos
-
-    def parse(self) -> Dict[str, Tuple[str, Optional[int]]]:
-        if not os.path.exists(self.file_path):
-            print(f"Error: File {self.file_path} not found")
-            return self.store
-
-        with open(self.file_path, "rb") as db_file:
+    
+    @staticmethod
+    def read_rdb(file_path):
+        if not os.path.exists(file_path):
+            print(f"Error: File {file_path} not found")
+            return None
+        with open(file_path, "rb") as db_file:
             data = db_file.read()
+
+        return data
+
+    def parse(self, data) -> Dict[str, Tuple[str, Optional[int]]]:
+        if not data:
+            print("Error: Empty RDB file")
+            return {}
 
         if data[:5] != b"REDIS":
             raise ValueError("Incorrect RDB format")

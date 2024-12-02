@@ -30,8 +30,11 @@ class CommandProcessor(Thread):
                 commands, buffer = RESPParser.decode(buffer)
 
                 for command, bytes in commands:
+                    cmds = self.process(command)
+                    add_wait = len(cmds) > 1
                     for response in self.process(command):
                         self.connection.sendall(response)
+                        if add_wait: time.sleep(0.1)
                     if self.state.replica_present and Constants.SET in command or Constants.DEL in command:
                         self.state.add_command_buffer(command)
             except Exception as e:
@@ -67,10 +70,11 @@ class CommandProcessor(Thread):
             case [Constants.INFO, section]:
                 return [RESPParser.encode(self.state.get_info()).encode()]
             case [Constants.WAIT, _, _]:
-                return [RESPParser.encode(0).encode()]
+                return [RESPParser.encode(len(self.state.repl_ports)).encode()]
             case [Constants.REPL_CONF, key, val]:
                 if key == Constants.LISTENING_PORT:
-                    self.state.repl_ports.append((self.connection.getpeername()[0], val))
+                    replica = (self.connection.getpeername()[0], int(val))
+                    if replica not in self.state.repl_ports: self.state.repl_ports.append(replica)
                 return [Constants.OK]
             case [Constants.PYSNC, master_id, repl_offset]:
                 master_replid = self.config['master_replid']
@@ -109,6 +113,7 @@ class SlaveCommandProcessor(Thread):
             commands, buffer = RESPParser.decode(buffer)
 
             for command, bytes in commands:
+                print(f'Command: {command} - Bytes: {bytes}')
                 response = self.process(command)
                 self.state.increment_repl_offset(bytes)
                 if response: self.connection.sendall(response)
@@ -152,9 +157,13 @@ class SlaveCommandProcessor(Thread):
             connection.sendall(RESPParser.encode(['REPLCONF', 'capa', 'psync2']).encode())
             connection.recv(1024)
             connection.sendall(RESPParser.encode(['PSYNC', '?', '-1']).encode())
-            connection.recv(1024)
-            connection.recv(1024)
-            time.sleep(1)
+            r1 = connection.recv(153)
+            res, rdb = RESPParser.decode(r1)
+
+            if not rdb:
+                rdb = connection.recv(93)
+
+            self.state.load_rdb(rdb[5:])
             print('Handshake successful')
 
             return connection

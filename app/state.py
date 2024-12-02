@@ -45,7 +45,7 @@ class State(Store):
         self.repl_ports: list[(str, int)] = []
         self.replica_present = False
         self.master_repl_offset = 0
-        self.load_rdb()
+        self.load_rdb_file()
     
     def get_config(self, key: str) -> str | None:
         return self.config[key] if key in self.config else ''
@@ -71,14 +71,19 @@ class State(Store):
         self.buffers[id] = collections.deque([])
         return id
 
-    def load_rdb(self):
+    def load_rdb_file(self):
         if not self.config['dir'] or not self.config['dbfilename']:
             return
         filepath = f"{self.config['dir']}/{self.config['dbfilename']}"
-        items = RDBParser(filepath).parse()
+        data = RDBParser.read_rdb(filepath)
+        self.load_rdb(data)
+    
+    def load_rdb(self, data: bytes):
+        parser = RDBParser()
+        items = parser.parse(data)
     
         for key, (value, ttl) in items.items():
             self.save(key, value, ttl)
-    
+
     def increment_repl_offset(self, bytes_processed: int):
         self.master_repl_offset += bytes_processed
