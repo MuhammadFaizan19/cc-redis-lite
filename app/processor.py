@@ -66,6 +66,8 @@ class CommandProcessor(Thread):
                 return [RESPParser.encode(self.state.keys()).encode()]
             case [Constants.INFO, section]:
                 return [RESPParser.encode(self.state.get_info()).encode()]
+            case [Constants.WAIT, _, _]:
+                return [RESPParser.encode(0).encode()]
             case [Constants.REPL_CONF, key, val]:
                 if key == Constants.LISTENING_PORT:
                     self.state.repl_ports.append((self.connection.getpeername()[0], val))
@@ -150,8 +152,8 @@ class SlaveCommandProcessor(Thread):
             connection.sendall(RESPParser.encode(['REPLCONF', 'capa', 'psync2']).encode())
             connection.recv(1024)
             connection.sendall(RESPParser.encode(['PSYNC', '?', '-1']).encode())
-            a = connection.recv(1024)
-            b = connection.recv(1024)
+            connection.recv(1024)
+            connection.recv(1024)
             time.sleep(1)
             print('Handshake successful')
 
