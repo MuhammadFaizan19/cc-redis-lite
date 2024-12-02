@@ -42,10 +42,11 @@ class RESPParser:
 
         while current_index < len(buffer):
             try:
+                inital = current_index
                 message, current_index = RESPParser._parse_value(buffer, current_index)
                 if isinstance(message, list) and message and isinstance(message[0], str):
                     message[0] = message[0].upper()  # Normalize the command name
-                decoded_messages.append(message)
+                decoded_messages.append((message, current_index - inital))
             except RESPParser.IncompleteRESPError:
                 return decoded_messages, buffer[current_index:]
 

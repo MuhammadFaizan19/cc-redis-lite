@@ -44,6 +44,7 @@ class State(Store):
         self.repl_connections_lock = threading.Lock()
         self.repl_ports: list[(str, int)] = []
         self.replica_present = False
+        self.master_repl_offset = 0
         self.load_rdb()
     
     def get_config(self, key: str) -> str | None:
@@ -53,7 +54,7 @@ class State(Store):
         return ''.join([
             f'role:{self.role}\r\n',
             f'master_replid:{self.config["master_replid"]}\r\n',
-            f'master_repl_offset:{self.config["master_repl_offset"]}\r\n'
+            f'master_repl_offset:{self.master_repl_offset}\r\n'
         ])
 
     def is_master(self):
@@ -78,4 +79,6 @@ class State(Store):
     
         for key, (value, ttl) in items.items():
             self.save(key, value, ttl)
-        
+    
+    def increment_repl_offset(self, bytes_processed: int):
+        self.master_repl_offset += bytes_processed

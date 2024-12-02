@@ -29,7 +29,7 @@ class CommandProcessor(Thread):
                 buffer += original_message
                 commands, buffer = RESPParser.decode(buffer)
 
-                for command in commands:
+                for command, bytes in commands:
                     for response in self.process(command):
                         self.connection.sendall(response)
                     if self.state.replica_present and Constants.SET in command or Constants.DEL in command:
@@ -106,32 +106,36 @@ class SlaveCommandProcessor(Thread):
             buffer += original_message
             commands, buffer = RESPParser.decode(buffer)
 
-            for command in commands:
+            for command, bytes in commands:
                 response = self.process(command)
-                self.connection.sendall(response)
+                self.state.increment_repl_offset(bytes)
+                if response: self.connection.sendall(response)
 
         if self.connection: self.connection.close()
 
     def process(self, command):
         match command:
             case [Constants.PING]:
-                return RESPParser.encode('PONG').encode()
+                print('Received PING')
+                return
             case [Constants.ECHO, message]:
-                return RESPParser.encode(message).encode()
+                print(f'Received ECHO {message}')
+                return 
             case [Constants.GET, key]:
-                return RESPParser.encode(self.state.get(key)).encode()
+                print(f'Received GET {key}')
+                return
             case [Constants.SET, key, value]:
                 self.state.save(key, value)
-                return Constants.OK
+                return
             case [Constants.SET, key, value, Constants.px, ttl]:
                 self.state.save(key, value, int(ttl) + time.time() * 1000)
-                return Constants.OK
+                return
             case [Constants.DEL, key]:
                 self.state.delete(key)
-                return Constants.OK
+                return
             case [Constants.REPL_CONF, Constants.GETACK, pattern]:
                 if pattern == '*':
-                    return RESPParser.encode([Constants.REPL_CONF, Constants.ACK, '0']).encode()
+                    return RESPParser.encode([Constants.REPL_CONF, Constants.ACK, str(self.state.master_repl_offset)]).encode()
         print(f'Command not recognized: {command}') 
         return Constants.NULL
             
@@ -148,6 +152,7 @@ class SlaveCommandProcessor(Thread):
             connection.sendall(RESPParser.encode(['PSYNC', '?', '-1']).encode())
             a = connection.recv(1024)
             b = connection.recv(1024)
+            time.sleep(1)
             print('Handshake successful')
 
             return connection
