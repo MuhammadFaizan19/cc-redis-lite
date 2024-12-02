@@ -69,7 +69,8 @@ class CommandProcessor(Thread):
                 return [RESPParser.encode(self.state.keys()).encode()]
             case [Constants.INFO, section]:
                 return [RESPParser.encode(self.state.get_info()).encode()]
-            case [Constants.WAIT, _, _]:
+            case [Constants.WAIT, _, time]:
+                time.sleep(int(time) / 1000)
                 return [RESPParser.encode(len(self.state.repl_ports)).encode()]
             case [Constants.REPL_CONF, key, val]:
                 if key == Constants.LISTENING_PORT:
