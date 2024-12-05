@@ -11,10 +11,14 @@ def main():
 
     if state.role == Constants.SLAVE:
        SlaveCommandProcessor(state, config).start()
-
-    while True:
-        connection, address = server.accept()
-        CommandProcessor(connection, state, config).start()
+       while True:
+            connection, _ = server.accept()
+            SlaveCommandProcessor(state, config, connection).start()
+    
+    else:
+        while True:
+            connection, _ = server.accept()
+            CommandProcessor(connection, state, config).start()
 
 
 if __name__ == '__main__':

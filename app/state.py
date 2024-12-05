@@ -1,4 +1,5 @@
 import time
+import socket
 import threading
 import collections
 
@@ -41,10 +42,13 @@ class State(Store):
         self.config = config
         self.role = Constants.SLAVE if self.config['is_replica'] else Constants.MASTER
         self.buffers = {}
-        self.repl_connections_lock = threading.Lock()
-        self.repl_ports: list[(str, int)] = []
         self.replica_present = False
+        self.offset_lock = threading.Lock()
         self.master_repl_offset = 0
+        self.repl_connections_lock = threading.Lock()
+        self.repl_connections: list[socket.socket] = []
+        self.ack_count_lock = threading.Lock()
+        self.ack_count = 0
         self.load_rdb_file()
     
     def get_config(self, key: str) -> str | None:
@@ -62,13 +66,14 @@ class State(Store):
         
     def add_command_buffer(self, command):
         for k,_ in self.buffers.items():
-            self.buffers[k].append(command)
+            self.buffers[k].append(command)        
         return 0
     
-    def add_new_replica(self) -> int:
+    def add_new_replica(self, connection: socket.socket) -> int:
         self.replica_present = True
-        id = len(self.buffers)
-        self.buffers[id] = collections.deque([])
+        with self.repl_connections_lock:
+            self.buffers[connection] = collections.deque([])
+            self.repl_connections.append(connection)
         return id
 
     def load_rdb_file(self):
@@ -86,4 +91,17 @@ class State(Store):
             self.save(key, value, ttl)
 
     def increment_repl_offset(self, bytes_processed: int):
-        self.master_repl_offset += bytes_processed
+        with self.offset_lock:
+            self.master_repl_offset += bytes_processed
+    
+    def increment_ack_count(self):
+        with self.ack_count_lock:
+            self.ack_count += 1
+
+    def reset_ack_count(self):
+        with self.ack_count_lock:
+            self.ack_count = 0
+
+    def get_ack_count(self):
+        with self.ack_count_lock:
+            return self.ack_count
