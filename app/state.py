@@ -8,13 +8,13 @@ from app.utils import RDBParser
 
 class Store:
     def __init__(self) -> None:
-        self.store = collections.defaultdict(lambda: ('', None))
+        self.store = collections.defaultdict(lambda: (None, None))
     
     def save(self, key: str, value: str, ttl: int = None):
         self.store[key] = (value, ttl)
     
     def get(self, key: str) -> str | None:
-        return self.store[key][0] if not self.is_expired(key) else ''
+        return self.store[key][0] if not self.is_expired(key) else None
 
     def delete(self, key: str) -> None:
         self.store.pop(key, None)

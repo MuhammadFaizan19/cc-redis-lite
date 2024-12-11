@@ -7,6 +7,7 @@ class Constants:
     CONFIG = 'CONFIG'
     KEYS = 'KEYS'
     INFO = 'INFO'
+    TYPE = 'TYPE'
     REPL_CONF = 'REPLCONF'
     PYSNC = 'PSYNC'
     LISTENING_PORT = 'listening-port'

@@ -66,6 +66,10 @@ class CommandProcessor(Thread):
                 self.state.save(key, value, int(ttl) + time.time() * 1000)
                 self.send(Constants.OK)
             
+            case [Constants.TYPE, key]:
+                value = self.state.get(key)
+                self.send('string' if value else 'none')
+
             case [Constants.DEL, key]:
                 self.state.delete(key)
                 self.send(Constants.OK)
