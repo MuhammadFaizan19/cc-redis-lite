@@ -34,7 +34,21 @@ class Store:
     
     def flush(self) -> None:
         self.store.clear()
+    
+    def get_type(self, key: str) -> str:
+        if key not in self.store or self.is_expired(key):
+            return 'none'
         
+        value = self.store[key][0]
+        if isinstance(value, dict):
+            return 'stream'
+        
+        return 'string' 
+
+    def save_stream(self, key: str, id: str, key_value_pairs) -> None:
+        if key not in self.store:
+            self.save(key, {})
+        self.store[key][0][id] = key_value_pairs
 
 class State(Store):
     def __init__(self, config):
@@ -105,3 +119,10 @@ class State(Store):
     def get_ack_count(self):
         with self.ack_count_lock:
             return self.ack_count
+    
+    def add_stream(self, key: str, id: str, fields) -> None:
+        key_value_pairs = {}
+        for i in range(0, len(fields), 2):
+            key_value_pairs[fields[i]] = fields[i+1]
+       
+        self.save_stream(key, id, key_value_pairs)

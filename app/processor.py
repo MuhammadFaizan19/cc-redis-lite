@@ -67,8 +67,7 @@ class CommandProcessor(Thread):
                 self.send(Constants.OK)
             
             case [Constants.TYPE, key]:
-                value = self.state.get(key)
-                self.send('string' if value else 'none')
+                self.send(self.state.get_type(key))
 
             case [Constants.DEL, key]:
                 self.state.delete(key)
@@ -95,6 +94,10 @@ class CommandProcessor(Thread):
                 self.talking_to_replica = True
                 self.state.add_new_replica(self.connection)
             
+            case [Constants.XADD, stream_key, id, *fields]:
+                self.state.add_stream(stream_key, id, fields)
+                self.send(id)
+
             case _:
                 return [Constants.NULL]
     
