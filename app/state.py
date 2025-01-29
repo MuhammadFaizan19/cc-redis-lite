@@ -40,15 +40,29 @@ class Store:
             return 'none'
         
         value = self.store[key][0]
-        if isinstance(value, dict):
+        if isinstance(value, list):
             return 'stream'
         
         return 'string' 
 
-    def save_stream(self, key: str, id: str, key_value_pairs) -> None:
+    def validate_stream(self, key: str, entry: dict) -> str:
+        id = entry['id']
+        last_id = self.store[key][0][-1]['id'] if self.store[key][0] else '0-0'
+        
+        if id == '0-0':
+            return Constants.ERROR_MIN_STREAM_ID
+        if id <= last_id:
+            return Constants.ERROR_STREAM_KEY
+
+    def save_stream(self, key: str, entry: dict) -> None:
         if key not in self.store:
-            self.save(key, {})
-        self.store[key][0][id] = key_value_pairs
+            self.save(key, [])
+
+        if error:= self.validate_stream(key, entry):
+            return error
+
+        self.store[key][0].append(entry)
+        return entry['id']
 
 class State(Store):
     def __init__(self, config):
@@ -120,9 +134,3 @@ class State(Store):
         with self.ack_count_lock:
             return self.ack_count
     
-    def add_stream(self, key: str, id: str, fields) -> None:
-        key_value_pairs = {}
-        for i in range(0, len(fields), 2):
-            key_value_pairs[fields[i]] = fields[i+1]
-       
-        self.save_stream(key, id, key_value_pairs)
