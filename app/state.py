@@ -134,3 +134,19 @@ class State(Store):
         with self.ack_count_lock:
             return self.ack_count
     
+    def generate_stream_entry_id(self, key: str, id: str) -> str:
+        if '*' not in id:
+            return id
+
+        if id == '*':
+            return str(int(time.time() * 1000)) + '-0'
+        
+        time_sequence = id.split('-')[0]
+        if key in self.store:
+            last_id = self.store[key][0][-1]['id'] if self.store[key][0] else '0-0'
+            parts = last_id.split('-')
+            
+            if parts[0] == time_sequence:
+                return f"{parts[0]}-{int(parts[1]) + 1}"
+        
+        return time_sequence + '-0' if int(time_sequence) > 0 else time_sequence + '-1'
