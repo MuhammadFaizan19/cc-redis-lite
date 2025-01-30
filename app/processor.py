@@ -94,12 +94,14 @@ class CommandProcessor(Thread):
                 self.talking_to_replica = True
                 self.state.add_new_replica(self.connection)
             
-            case [Constants.XADD, stream_key, id, entry_key, entry_value]:
+            case [Constants.XADD, stream_key, id, *fields]:
                 entry_id = self.state.generate_stream_entry_id(stream_key, id)
-                entry = {'id': entry_id, 'key': entry_key, 'value': entry_value}
-                res = self.state.save_stream(stream_key, entry)
+                res = self.state.save_stream(stream_key, entry_id, fields)
                 self.send(res)
 
+            case [Constants.XRANGE, stream_key, start, end]:
+                res = self.state.query_stream(stream_key, start, end)
+                self.send(res)
             case _:
                 return [Constants.NULL]
     

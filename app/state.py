@@ -45,24 +45,23 @@ class Store:
         
         return 'string' 
 
-    def validate_stream(self, key: str, entry: dict) -> str:
-        id = entry['id']
-        last_id = self.store[key][0][-1]['id'] if self.store[key][0] else '0-0'
+    def validate_stream(self, key: str, id: str) -> str:
+        last_id = self.store[key][0][-1][0] if self.store[key][0] else '0-0'
         
         if id == '0-0':
             return Constants.ERROR_MIN_STREAM_ID
         if id <= last_id:
             return Constants.ERROR_STREAM_KEY
 
-    def save_stream(self, key: str, entry: dict) -> None:
+    def save_stream(self, key: str, entry_id: str, fields: list) -> None:
         if key not in self.store:
             self.save(key, [])
 
-        if error:= self.validate_stream(key, entry):
+        if error:= self.validate_stream(key, entry_id):
             return error
 
-        self.store[key][0].append(entry)
-        return entry['id']
+        self.store[key][0].append([entry_id, fields])
+        return entry_id
 
 class State(Store):
     def __init__(self, config):
@@ -141,12 +140,41 @@ class State(Store):
         if id == '*':
             return str(int(time.time() * 1000)) + '-0'
         
-        time_sequence = id.split('-')[0]
+        time_part = id.split('-')[0]
         if key in self.store:
-            last_id = self.store[key][0][-1]['id'] if self.store[key][0] else '0-0'
+            last_id = self.store[key][0][-1][0] if self.store[key][0] else '0-0'
             parts = last_id.split('-')
             
-            if parts[0] == time_sequence:
+            if parts[0] == time_part:
                 return f"{parts[0]}-{int(parts[1]) + 1}"
         
-        return time_sequence + '-0' if int(time_sequence) > 0 else time_sequence + '-1'
+        return time_part + '-0' if int(time_part) > 0 else time_part + '-1'
+
+    def query_stream(self, key: str, start: str, end: str) -> list:
+        if key not in self.store or self.store[key][0] is None or len(self.store[key][0]) == 0:
+            return []
+        
+        entries = self.store[key][0]
+        result = []
+        start_has_sequence = '-' in start
+        end_has_sequence = '-' in end
+
+        i = 0
+
+        while i < len(entries):
+            id = entries[i][0]
+            # if start range has sequence then compare whole id, else compare only time part
+            if (start_has_sequence and id < start) or (not start_has_sequence and id.split('-')[0] <= start):
+                i += 1
+                continue
+            break
+        
+        while i < len(entries):
+            id = entries[i][0]
+            # if end range has sequence then compare whole id, else compare only time part
+            if (end_has_sequence and id > end) or (not end_has_sequence and id.split('-')[0] > end):
+                break
+            result.append(entries[i])
+            i += 1
+
+        return result        
