@@ -154,6 +154,10 @@ class State(Store):
         if key not in self.store or self.store[key][0] is None or len(self.store[key][0]) == 0:
             return []
         
+        # return all entries if start and end are open ranges
+        if start == '-' and end == '+':
+            return self.store[key][0]
+        
         entries = self.store[key][0]
         result = []
         start_has_sequence = '-' in start
@@ -164,15 +168,17 @@ class State(Store):
         while i < len(entries):
             id = entries[i][0]
             # if start range has sequence then compare whole id, else compare only time part
-            if (start_has_sequence and id < start) or (not start_has_sequence and id.split('-')[0] <= start):
+            # exit the loop if entries are required from the beginning of the stream i.e. start is '-'
+            if ((start_has_sequence and id < start) or (not start_has_sequence and id.split('-')[0] <= start)) and start != '-':
                 i += 1
                 continue
             break
         
         while i < len(entries):
             id = entries[i][0]
-            # if end range has sequence then compare whole id, else compare only time part
-            if (end_has_sequence and id > end) or (not end_has_sequence and id.split('-')[0] > end):
+            # if end range has sequence then compare whole id, otherwise compare only time part
+            # do not exit the loop if entries are required till the end of the stream i.e. end is '+'
+            if ((end_has_sequence and id > end) or (not end_has_sequence and id.split('-')[0] > end)) and end != '+':
                 break
             result.append(entries[i])
             i += 1
