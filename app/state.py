@@ -150,7 +150,7 @@ class State(Store):
         
         return time_part + '-0' if int(time_part) > 0 else time_part + '-1'
 
-    def query_stream(self, key: str, start: str, end: str) -> list:
+    def get_stream_entries(self, key: str, start: str, end: str) -> list:
         if key not in self.store or self.store[key][0] is None or len(self.store[key][0]) == 0:
             return []
         
@@ -183,4 +183,19 @@ class State(Store):
             result.append(entries[i])
             i += 1
 
-        return result        
+        return result
+    
+    def read_multiple_streams(self, keys_and_ids: list) -> list:
+        streams = []
+        n = len(keys_and_ids) // 2
+
+        for i in range(n):
+            key = keys_and_ids[i]
+            id = keys_and_ids[n + i]
+            streams.append((key, id))
+
+        result = []
+        for stream_key, id in streams:
+            entries = self.get_stream_entries(stream_key, id, '+')
+            result.append([stream_key, entries])
+        return result

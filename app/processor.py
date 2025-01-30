@@ -100,7 +100,11 @@ class CommandProcessor(Thread):
                 self.send(res)
 
             case [Constants.XRANGE, stream_key, start, end]:
-                res = self.state.query_stream(stream_key, start, end)
+                res = self.state.get_stream_entries(stream_key, start, end)
+                self.send(res)
+            
+            case [Constants.XREAD, _, *keys_and_ids]:
+                res = self.state.read_multiple_streams(keys_and_ids)
                 self.send(res)
             case _:
                 return [Constants.NULL]
