@@ -5,7 +5,7 @@ import threading
 import collections
 
 from app.constants import Constants
-from app.utils import RDBParser
+from app.utils import RDBParser, is_numeric
 
 class Store:
     def __init__(self) -> None:
@@ -224,3 +224,15 @@ class State(Store):
                 await asyncio.sleep(0.05)
             
             return [[stream_key, [last_entry[:2]]]] if last_entry else None
+    
+    def incr(self, key: str) -> int | str:
+        if self.get_type(key) == 'none':
+            self.save(key, '1')
+            return 1
+
+        if is_numeric(self.store[key][0]):
+            curr_value, ttl = self.store[key]
+            self.save(key, str(int(curr_value) + 1), ttl)
+            return int(curr_value) + 1
+        
+        return Constants.ERROR_NON_INT

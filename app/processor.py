@@ -112,6 +112,10 @@ class CommandProcessor(Thread):
                 else:
                     res = self.state.read_multiple_streams(data[1:])
                 self.send(res)
+
+            case [Constants.INCR, key]:
+                self.send(self.state.incr(key))
+
             case _:
                 return [Constants.NULL]
     
