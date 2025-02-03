@@ -1,6 +1,7 @@
 import time
 import select
 import socket
+import asyncio
 from threading import Thread
 
 from app.state import State
@@ -103,8 +104,13 @@ class CommandProcessor(Thread):
                 res = self.state.get_stream_entries(stream_key, start, end)
                 self.send(res)
             
-            case [Constants.XREAD, _, *keys_and_ids]:
-                res = self.state.read_multiple_streams(keys_and_ids)
+            case [Constants.XREAD, *data]:
+                # default to empty list if no BLOCK is present
+                res = None if Constants.BLOCK in data else []
+                if Constants.BLOCK in data:
+                    res = asyncio.run(self.state.read_blocking_streams(data[3:], int(data[1])))
+                else:
+                    res = self.state.read_multiple_streams(data[1:])
                 self.send(res)
             case _:
                 return [Constants.NULL]

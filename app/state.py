@@ -1,5 +1,6 @@
 import time
 import socket
+import asyncio
 import threading
 import collections
 
@@ -60,7 +61,8 @@ class Store:
         if error:= self.validate_stream(key, entry_id):
             return error
 
-        self.store[key][0].append([entry_id, fields])
+        current_time = int(time.time() * 1000)
+        self.store[key][0].append([entry_id, fields, current_time])
         return entry_id
 
 class State(Store):
@@ -158,15 +160,15 @@ class State(Store):
         if start == '-' and end == '+':
             return self.store[key][0]
         
-        entries = self.store[key][0]
+        all_entries = self.store[key][0]
         result = []
         start_has_sequence = '-' in start
         end_has_sequence = '-' in end
 
         i = 0
 
-        while i < len(entries):
-            id = entries[i][0]
+        while i < len(all_entries):
+            id = all_entries[i][0]
             # if start range has sequence then compare whole id, else compare only time part
             # exit the loop if entries are required from the beginning of the stream i.e. start is '-'
             if ((start_has_sequence and id < start) or (not start_has_sequence and id.split('-')[0] <= start)) and start != '-':
@@ -174,13 +176,13 @@ class State(Store):
                 continue
             break
         
-        while i < len(entries):
-            id = entries[i][0]
+        while i < len(all_entries):
+            id = all_entries[i][0]
             # if end range has sequence then compare whole id, otherwise compare only time part
             # do not exit the loop if entries are required till the end of the stream i.e. end is '+'
             if ((end_has_sequence and id > end) or (not end_has_sequence and id.split('-')[0] > end)) and end != '+':
                 break
-            result.append(entries[i])
+            result.append(all_entries[i][:2])
             i += 1
 
         return result
@@ -199,3 +201,26 @@ class State(Store):
             entries = self.get_stream_entries(stream_key, id, '+')
             result.append([stream_key, entries])
         return result
+
+    async def read_blocking_streams(self, keys_and_ids: list, timeout: int) -> list:
+        task = asyncio.create_task(self.read_stream_task(keys_and_ids, timeout))
+        return await task
+        
+    async def read_stream_task(self, keys_and_ids: list, timeout: int) -> list:
+            current_time = int(time.time() * 1000)
+            stream_key = keys_and_ids[0]
+            last_entry = None
+
+            
+            if timeout == 0:
+                timeout = float('inf') # block until new entry is added
+
+            while int(time.time() * 1000) - current_time < timeout:
+                all_entries = self.store[stream_key][0]
+                last_entry = all_entries[-1] if len(all_entries) > 0 else None
+                if last_entry and last_entry[2] > current_time:
+                    break
+                last_entry = None
+                await asyncio.sleep(0.05)
+            
+            return [[stream_key, [last_entry[:2]]]] if last_entry else None
