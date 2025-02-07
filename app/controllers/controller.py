@@ -2,6 +2,7 @@ import time
 import select
 import socket
 import asyncio
+import collections
 from threading import Thread
 
 from app.context import State
@@ -14,6 +15,8 @@ class Controller(Thread):
         self.state = state
         self.connection = connection if connection or self.state.is_master() else self.handshake()
         self.talking_to_replica = False
+        self.is_multi_active = False
+        self.multi_commands_queue = collections.deque([])
 
     def run(self):
         buffer = b''
@@ -44,9 +47,26 @@ class Controller(Thread):
         if self.talking_to_replica and self.state.is_master():
             self.run_sync_replica()
         self.connection.close()
-
     
     def process_command(self, command: list) -> list:
+        if self.is_multi_active:
+            if command[0] == Constants.EXEC:
+                self.is_multi_active = False
+                result = []
+
+                for multi_command in self.multi_commands_queue:
+                    for res in self.process_command(multi_command):
+                        result.append(res)
+
+                return [result]
+            elif command[0] == Constants.DISCARD:
+                self.is_multi_active = False
+                self.multi_commands_queue.clear()
+                return [Constants.OK]
+            else:
+                self.multi_commands_queue.append(command)
+                return [Constants.QUEUED]
+
         if (
             self.state.role == Constants.MASTER and
             self.state.replica_present and
@@ -124,6 +144,17 @@ class Controller(Thread):
 
             case [Constants.WAIT, num_replicas, timeout]:
                 return self.handle_wait([num_replicas, timeout])
+
+            case [Constants.MULTI]:
+                self.is_multi_active = True
+                self.multi_commands_queue.clear()
+                return [Constants.OK]
+            
+            case [Constants.EXEC]:
+                return [Constants.ERROR_EXEC]
+            
+            case [Constants.DISCARD]:
+                return [Constants.ERROR_DISCARD]
 
             case _:
                 return [Constants.NULL]

@@ -14,6 +14,12 @@ class RESPParser:
         """
         if data is None:
             return '$-1\r\n'
+        if isinstance(data, bytes):
+            # Decode and re-encode to ensure consistency
+            # first element is the commands list, each element within the list is a tuple of command and its byte size
+            return RESPParser.encode(RESPParser.decode(data)[0][0][0])
+        if isinstance(data, str) and data.startswith('ERR'):
+            return f'-{data}\r\n'
         if isinstance(data, str):
             return f'${len(data)}\r\n{data}\r\n' if data else '$-1\r\n'
         if isinstance(data, int):
@@ -58,7 +64,7 @@ class RESPParser:
             raise RESPParser.IncompleteRESPError()
 
         prefix = buffer[index]
-        if prefix == ord('+'):
+        if prefix == ord('+') or prefix == ord('-'):
             return RESPParser._parse_simple_string(buffer, index)
         elif prefix == ord(':'):
             return RESPParser._parse_integer(buffer, index)
