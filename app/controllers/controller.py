@@ -32,12 +32,14 @@ class Controller(Thread):
                 buffer += raw_message
                 commands, buffer = RESPParser.decode(buffer)
                 
-                for command, _ in commands:
+                for command, bytes_processed in commands:
                     result = self.process_command(command)
                     
                     for message in result:
                         self.send(message)
-
+                    
+                    if not self.state.is_master():
+                        self.state.increment_repl_offset(bytes_processed)
 
             except Exception as e:
                 print(f'Error processing command: {e}')
@@ -76,7 +78,7 @@ class Controller(Thread):
 
         match command:
             case [Constants.PING]:
-                return ['PONG']
+                return ['PONG'] if self.state.is_master() else []
 
             case [Constants.ECHO, message]:
                 return [message]
@@ -143,7 +145,7 @@ class Controller(Thread):
                 return [self.state.incr(key)]
 
             case [Constants.WAIT, num_replicas, timeout]:
-                return self.handle_wait([num_replicas, timeout])
+                return asyncio.run(self.handle_wait([num_replicas, timeout]))
 
             case [Constants.MULTI]:
                 self.is_multi_active = True
@@ -167,40 +169,6 @@ class Controller(Thread):
                 command = thread_queue[0]
                 self.connection.sendall(RESPParser.encode(command).encode())
                 thread_queue.popleft()
-
-    def handle_wait(self, args: list) -> None:
-        num_replicas = int(args[0])
-        timeout = int(args[1])
-
-        start_time = time.time()
-        self.request_acks_from_replicas(timeout)
-
-        while time.time() - start_time < timeout:
-            if self.state.get_ack_count() >= num_replicas:
-                break
-            time.sleep(0.1)
-        
-        self.connection.sendall(RESPParser.encode([Constants.ACK, Constants.OK]).encode())
-        self.state.reset_ack_count()
-        return [] # return empty list to avoid sending response to client
-        
-    
-    def request_acks_from_replicas(self, timeout: int) -> None:
-        for connection in self.state.repl_connections:
-            try:
-                while len(self.state.buffers[connection]) > 0:
-                    time.sleep(0.1)
-
-                connection.sendall(RESPParser.encode([Constants.REPL_CONF, Constants.GETACK, '*']).encode())
-
-                ready_to_read, _, _ = select.select([connection], [], [], timeout)
-                if ready_to_read:
-                    response, _ = RESPParser.decode(connection.recv(1024))
-                    if Constants.ACK in response[0][0]:
-                        self.state.increment_ack_count()
-
-            except Exception as e:
-                print(f"Error communicating with replica: {e}")
     
     def handshake(self):
         try:
@@ -213,7 +181,7 @@ class Controller(Thread):
             connection.sendall(RESPParser.encode(['REPLCONF', 'capa', 'psync2']).encode())
             connection.recv(1024)
             connection.sendall(RESPParser.encode(['PSYNC', '?', '-1']).encode())
-            r1 = connection.recv(148)
+            r1 = connection.recv(149)
             res, rdb = RESPParser.decode(r1)
 
             if not rdb:
@@ -226,8 +194,61 @@ class Controller(Thread):
             connection.close()
             print(f'Error during handshake: {e}')
 
+    async def handle_wait(self, args: list) -> list:
+        try:
+            num_replicas, timeout = int(args[0]), (int(args[1]) + 200) / 1000
+            start_time = time.time()
+
+            await self.request_acks_from_replicas(timeout)
+
+            while time.time() - start_time < timeout:
+                if self.state.get_ack_count() >= num_replicas:
+                    break
+                await asyncio.sleep(0.01)
+
+            self.connection.sendall(RESPParser.encode(self.state.get_ack_count()).encode())
+            self.state.reset_ack_count()
+        except Exception as e:
+            print(f"Error in handle_wait: {e}")
+            try:
+                self.connection.sendall(RESPParser.encode("ERROR").encode())
+            except Exception:
+                pass  # Prevent cascading failure if send fails
+        return []
+
+    async def request_acks_from_replicas(self, timeout: float) -> None:
+        async def send_ack_request(connection: socket.socket):
+            try:
+                for _ in range(5):
+                    if len(self.state.buffers.get(connection, [])) == 0:
+                        break
+                    await asyncio.sleep(0.01)
+
+                connection.sendall(RESPParser.encode([Constants.REPL_CONF, Constants.GETACK, '*']).encode())
+
+                try:
+                    response = await asyncio.wait_for(self.read_response(connection), timeout + 0.25)
+                    if response and isinstance(response, list) and response[0] and Constants.ACK in response[0][0]:
+                        self.state.increment_ack_count()
+                except asyncio.TimeoutError:
+                    print(f"Timeout waiting for ACK from {connection.getpeername()}")
+            except (ConnectionResetError, BrokenPipeError) as e:
+                print(f"Connection error with replica {connection.getpeername()}: {e}")
+
+        await asyncio.gather(*(send_ack_request(conn) for conn in self.state.repl_connections if conn))
+
+    async def read_response(self, connection: socket.socket) -> list:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._blocking_recv, connection)
+
+    def _blocking_recv(self, connection: socket.socket) -> list:
+        try:
+            ready_to_read, _, _ = select.select([connection], [], [], 2)
+            if ready_to_read:
+                return RESPParser.decode(connection.recv(1024))[0]
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        return []
+        
     def send(self, message) -> None:
-        if isinstance(message, bytes):
-            self.connection.sendall(message)
-        else:
-            self.connection.sendall(RESPParser.encode(message).encode())
+        self.connection.sendall(message if isinstance(message, bytes) else RESPParser.encode(message).encode())
