@@ -4,105 +4,111 @@ import socket
 import asyncio
 from threading import Thread
 
-from app.state import State
+from app.context import State
 from app.utils import RESPParser
 from app.constants import Constants
 
-class CommandProcessor(Thread):
-    def __init__(self, connection: socket.socket, state: State, config) -> None:
+class Controller(Thread):
+    def __init__(self, state: State, connection: socket.socket = None) -> None:
         super().__init__()
         self.state = state
-        self.config = config
-        self.connection = connection
+        self.connection = connection if connection or self.state.is_master() else self.handshake()
         self.talking_to_replica = False
-    
+
     def run(self):
         buffer = b''
         while True:
             try:
-                if self.talking_to_replica:
+                if self.state.is_master() and self.talking_to_replica:
                     break
 
-                original_message = self.connection.recv(8000)
-                if not original_message:  # Connection closed
+                raw_message = self.connection.recv(8000)
+                if not raw_message:
                     break
 
-                buffer += original_message
+                buffer += raw_message
                 commands, buffer = RESPParser.decode(buffer)
-
+                
                 for command, _ in commands:
-                    if self.state.replica_present and Constants.SET in command or Constants.DEL in command:
-                        self.state.add_command_buffer(command)
-
-                    if command[0] == Constants.WAIT:
-                        self.handle_wait(command)
-                        continue
+                    result = self.process_command(command)
                     
-                    self.process(command)
-            except Exception as e:
-                self.connection.sendall(RESPParser.encode(f'Error: {e}').encode())
-                break
+                    for message in result:
+                        self.send(message)
 
+
+            except Exception as e:
+                print(f'Error processing command: {e}')
+                self.connection.sendall(RESPParser.encode(f'-Err: {e}').encode())
+                break
+        
         if self.talking_to_replica and self.state.is_master():
             self.run_sync_replica()
         self.connection.close()
 
     
-    def process(self, command):
+    def process_command(self, command: list) -> list:
+        if (
+            self.state.role == Constants.MASTER and
+            self.state.replica_present and
+            any(key in command for key in [Constants.SET, Constants.DEL, Constants.INCR])
+            ):
+            self.state.add_command_buffer(command)
+
         match command:
             case [Constants.PING]:
-                self.send('PONG')
+                return ['PONG']
 
             case [Constants.ECHO, message]:
-                self.send(message)
+                return [message]
             
             case [Constants.GET, key]:
-                self.send(self.state.get(key))
+                return [self.state.get(key)]
             
             case [Constants.SET, key, value]:
                 self.state.save(key, value)
-                self.send(Constants.OK)
+                return [Constants.OK] if self.state.is_master() else []
             
             case [Constants.SET, key, value, Constants.PX, ttl]:
                 self.state.save(key, value, int(ttl) + time.time() * 1000)
-                self.send(Constants.OK)
+                return [Constants.OK] if self.state.is_master() else []
             
             case [Constants.TYPE, key]:
-                self.send(self.state.get_type(key))
+                return [self.state.get_type(key)]
 
             case [Constants.DEL, key]:
                 self.state.delete(key)
-                self.send(Constants.OK)
+                return [Constants.OK] if self.state.is_master() else []
             
             case [Constants.CONFIG, Constants.GET, key]:
-                self.send([key, self.config[key]])
+                return [[key, self.state.config[key]]]
             
             case [Constants.KEYS, pattern]:
-                self.send(self.state.keys())
+                return [self.state.keys()]
             
             case [Constants.INFO, section]:
-                self.send(self.state.get_info())
+                return [self.state.get_info()]
+            
+            case [Constants.REPL_CONF, Constants.GETACK, _]:
+                return [[Constants.REPL_CONF, Constants.ACK, str(self.state.master_repl_offset)]]
             
             case [Constants.REPL_CONF, key, val]:
                 if key == Constants.ACK: self.state.increment_ack_count()
-                else: self.send(Constants.OK)
+                else: return [Constants.OK]
             
             case [Constants.PYSNC, _, _]:
-                full_resync =f'FULLRESYNC {self.config['master_replid']} 0'
-                self.send(full_resync)
-                self.send(Constants.EMPTY_RDB)
-
+                full_resync =f'FULLRESYNC {self.state.config['master_replid']} 0'
                 self.talking_to_replica = True
                 self.state.add_new_replica(self.connection)
+                return [full_resync, Constants.EMPTY_RDB]
             
             case [Constants.XADD, stream_key, id, *fields]:
                 entry_id = self.state.generate_stream_entry_id(stream_key, id)
                 res = self.state.save_stream(stream_key, entry_id, fields)
-                self.send(res)
+                return [res]
 
             case [Constants.XRANGE, stream_key, start, end]:
                 res = self.state.get_stream_entries(stream_key, start, end)
-                self.send(res)
+                return [res]
             
             case [Constants.XREAD, *data]:
                 # default to empty list if no BLOCK is present
@@ -111,14 +117,18 @@ class CommandProcessor(Thread):
                     res = asyncio.run(self.state.read_blocking_streams(data[3:], int(data[1])))
                 else:
                     res = self.state.read_multiple_streams(data[1:])
-                self.send(res)
+                return [res]
 
             case [Constants.INCR, key]:
-                self.send(self.state.incr(key))
+                return [self.state.incr(key)]
+
+            case [Constants.WAIT, num_replicas, timeout]:
+                return self.handle_wait([num_replicas, timeout])
 
             case _:
                 return [Constants.NULL]
-    
+
+
     def run_sync_replica(self):
         while True:
             thread_queue = self.state.buffers[self.connection]
@@ -127,9 +137,9 @@ class CommandProcessor(Thread):
                 self.connection.sendall(RESPParser.encode(command).encode())
                 thread_queue.popleft()
 
-    def handle_wait(self, command):
-        num_replicas = int(command[1])
-        timeout = int(command[2]) / 1000
+    def handle_wait(self, args: list) -> None:
+        num_replicas = int(args[0])
+        timeout = int(args[1])
 
         start_time = time.time()
         self.request_acks_from_replicas(timeout)
@@ -138,12 +148,13 @@ class CommandProcessor(Thread):
             if self.state.get_ack_count() >= num_replicas:
                 break
             time.sleep(0.1)
-
-        self.connection.sendall(RESPParser.encode((self.state.get_ack_count())).encode())
+        
+        self.connection.sendall(RESPParser.encode([Constants.ACK, Constants.OK]).encode())
         self.state.reset_ack_count()
-
-
-    def request_acks_from_replicas(self, timeout: int):
+        return [] # return empty list to avoid sending response to client
+        
+    
+    def request_acks_from_replicas(self, timeout: int) -> None:
         for connection in self.state.repl_connections:
             try:
                 while len(self.state.buffers[connection]) > 0:
@@ -156,65 +167,17 @@ class CommandProcessor(Thread):
                     response, _ = RESPParser.decode(connection.recv(1024))
                     if Constants.ACK in response[0][0]:
                         self.state.increment_ack_count()
+
             except Exception as e:
                 print(f"Error communicating with replica: {e}")
     
-    def send(self, message):
-        if isinstance(message, bytes):
-            return self.connection.sendall(message)
-        return self.connection.sendall(RESPParser.encode(message).encode())
-
-
-class SlaveCommandProcessor(Thread):
-    def __init__(self, state: State, config, connection: socket.socket = None):
-        super().__init__()
-        self.state = state
-        self.config = config
-        self.connection = connection if connection else self.handshake()
-    
-    def run(self):
-        buffer = b''
-        while True and self.connection is not None:
-            original_message = self.connection.recv(1024)
-
-            if not original_message:
-                break
-
-            buffer += original_message
-            commands, buffer = RESPParser.decode(buffer)
-
-            for command, bytes in commands:
-                self.process(command)
-                self.state.increment_repl_offset(bytes)
-
-        if self.connection: self.connection.close()
-
-    def process(self, command):
-        match command:
-            case [Constants.PING]:
-                pass
-            case [Constants.GET, key]:
-                self.send(self.state.get(key))
-            case [Constants.SET, key, value]:
-                self.state.save(key, value)
-            case [Constants.SET, key, value, Constants.px, ttl]:
-                self.state.save(key, value, int(ttl) + time.time() * 1000)
-            case [Constants.DEL, key]:
-                self.state.delete(key)
-            case [Constants.INFO, section]:
-                self.send(self.state.get_info())
-            case [Constants.REPL_CONF, Constants.GETACK, _]:
-                self.send([Constants.REPL_CONF, Constants.ACK, str(self.state.master_repl_offset)])
-            case _:
-                self.send(Constants.NULL)
-            
     def handshake(self):
         try:
-            connection = socket.create_connection((self.config['master_host'], self.config['master_port']))
+            connection = socket.create_connection((self.state.config['master_host'], self.state.config['master_port']))
             
             connection.sendall(RESPParser.encode(['PING']).encode())
             connection.recv(1024)
-            connection.sendall(RESPParser.encode(['REPLCONF', 'listening-port', str(self.config['port'])]).encode())
+            connection.sendall(RESPParser.encode(['REPLCONF', 'listening-port', str(self.state.config['port'])]).encode())
             connection.recv(1024)
             connection.sendall(RESPParser.encode(['REPLCONF', 'capa', 'psync2']).encode())
             connection.recv(1024)
@@ -232,5 +195,8 @@ class SlaveCommandProcessor(Thread):
             connection.close()
             print(f'Error during handshake: {e}')
 
-    def send(self, message):
-        return self.connection.sendall(RESPParser.encode(message).encode())
+    def send(self, message) -> None:
+        if isinstance(message, bytes):
+            self.connection.sendall(message)
+        else:
+            self.connection.sendall(RESPParser.encode(message).encode())

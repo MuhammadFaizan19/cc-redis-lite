@@ -30,3 +30,8 @@ class Constants:
     ERROR_MIN_STREAM_ID = b'-ERR The ID specified in XADD must be greater than 0-0\r\n'
     ERROR_STREAM_KEY = b'-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n'
     ERROR_NON_INT = b'-ERR value is not an integer or out of range\r\n'
+
+class ValueTypes:
+    STRING = 'string'
+    STREAM = 'stream'
+    NONE = 'none'
